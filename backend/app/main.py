@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import positions, fills, leaderboard, orders, news, vaults, ws
+from app.routers import positions, fills, leaderboard, orders, news, vaults, ws, export
 
 app = FastAPI(title="PerpScope API", version="0.1.0")
 
@@ -19,6 +19,7 @@ app.include_router(leaderboard.router, prefix="/api")
 app.include_router(orders.router, prefix="/api")
 app.include_router(news.router, prefix="/api")
 app.include_router(vaults.router, prefix="/api")
+app.include_router(export.router, prefix="/api")
 app.include_router(ws.router)
 
 

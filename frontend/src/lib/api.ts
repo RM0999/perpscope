@@ -20,11 +20,26 @@ export interface Position {
   marginMode: string;
   unrealizedPnl: number;
   liquidationPrice: number | null;
+  takeProfitPrice: number | null;
+  stopLossPrice: number | null;
+}
+
+export interface AccountSummary {
+  accountValue: number;
+  totalMarginUsed: number;
+  totalNtlPos: number;
+  withdrawable: number;
+}
+
+export interface PositionsResponse {
+  positions: Position[];
+  accountSummary: AccountSummary;
 }
 
 export interface Fill {
   coin: string;
   side: string;
+  dir: string | null;
   size: number;
   price: number;
   time: string;
@@ -32,12 +47,22 @@ export interface Fill {
   closedPnl: number;
 }
 
+export interface WindowPerformance {
+  day: number | null;
+  week: number | null;
+  month: number | null;
+  allTime: number | null;
+}
+
 export interface LeaderboardEntry {
   rank: number;
   address: string;
+  displayName: string | null;
+  accountValue: number;
   pnl: number;
   roi: number;
   volume: number;
+  windowPerformances: WindowPerformance | null;
 }
 
 export interface NewsItem {
@@ -62,17 +87,19 @@ export interface Order {
   coin: string;
   side: string;
   size: number;
-  price: number;
+  limitPrice: number;
   triggerPrice: number | null;
   orderType: string;
+  reduceOnly: boolean;
 }
 
-export async function getPositions(address: string): Promise<Position[]> {
+export async function getPositions(address: string): Promise<PositionsResponse> {
   return fetchApi(`/positions/${address}`);
 }
 
-export async function getFills(address: string): Promise<Fill[]> {
-  return fetchApi(`/fills/${address}`);
+export async function getFills(address: string, limit?: number): Promise<Fill[]> {
+  const query = limit ? `?limit=${limit}` : "";
+  return fetchApi(`/fills/${address}${query}`);
 }
 
 export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
@@ -90,4 +117,13 @@ export async function getNews(category?: string): Promise<NewsItem[]> {
 
 export async function getVaults(): Promise<Vault[]> {
   return fetchApi("/vaults");
+}
+
+export async function getTopTraders(count?: number): Promise<unknown[]> {
+  const query = count ? `?count=${count}` : "";
+  return fetchApi(`/export/top-traders${query}`);
+}
+
+export function downloadTopTraders(count: number = 20) {
+  window.open(`${API_BASE}/export/top-traders?count=${count}&download=true`, "_blank");
 }

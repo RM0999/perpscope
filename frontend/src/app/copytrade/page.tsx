@@ -174,9 +174,9 @@ export default function CopyTradePage() {
     let cancelled = false;
     async function fetchAllPositions() {
       try {
-        const results = await Promise.all(wallets.map((w) => getPositions(w).catch(() => [])));
+        const results = await Promise.all(wallets.map((w) => getPositions(w).catch(() => ({ positions: [], accountSummary: { accountValue: 0, totalMarginUsed: 0, totalNtlPos: 0, withdrawable: 0 } }))));
         if (!cancelled) {
-          setTotalPositions(results.reduce((sum, r) => sum + r.length, 0));
+          setTotalPositions(results.reduce((sum, r) => sum + r.positions.length, 0));
         }
       } catch {
         // ignore
