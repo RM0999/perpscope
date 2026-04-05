@@ -107,13 +107,14 @@ export default function CopyTradePage() {
         ws.onmessage = (event) => {
           try {
             const fill = JSON.parse(event.data);
+            if (fill.type === "ping" || fill.type === "error") return;
             addTradeEntry({
               time: fill.time || new Date().toISOString(),
               wallet,
-              coin: fill.coin,
-              side: fill.side,
-              size: fill.size,
-              price: fill.price,
+              coin: fill.coin || "",
+              side: fill.side || "",
+              size: fill.size || fill.sz || 0,
+              price: fill.price || fill.px || 0,
             });
           } catch {
             // Invalid message
@@ -200,7 +201,7 @@ export default function CopyTradePage() {
 
   // Apply filters to trade log
   const filteredLog = tradeLog.filter((entry) => {
-    if (filters.minSize > 0 && entry.size * entry.price < filters.minSize) return false;
+    if (filters.minSize > 0 && entry.size * (entry.price || 0) < filters.minSize) return false;
     if (filters.coinFilter) {
       const coins = filters.coinFilter.split(",").map((c) => c.trim().toUpperCase());
       if (coins.length > 0 && coins[0] !== "" && !coins.includes(entry.coin.toUpperCase())) return false;
@@ -507,7 +508,7 @@ export default function CopyTradePage() {
                     {entry.side === "B" || entry.side === "buy" ? "BUY" : "SELL"}
                   </td>
                   <td style={{ padding: "8px" }}>{entry.size}</td>
-                  <td style={{ padding: "8px" }}>${entry.price.toFixed(2)}</td>
+                  <td style={{ padding: "8px" }}>${Number(entry.price || 0).toFixed(2)}</td>
                 </tr>
               ))}
             </tbody>
