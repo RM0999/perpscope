@@ -33,7 +33,7 @@ async def fetch_fills(address: str, limit: int = Query(default=200, le=2000)):
                 dir=fill.get("dir", None),
                 size=float(fill.get("sz", 0)),
                 price=float(fill.get("px", 0)),
-                time=fill.get("time", ""),
+                time=str(fill.get("time", "")),
                 fee=float(fill.get("fee", 0)),
                 closedPnl=float(fill.get("closedPnl", 0)),
             )
