@@ -40,6 +40,33 @@ export interface LeaderboardEntry {
   volume: number;
 }
 
+export interface NewsItem {
+  id: string;
+  title: string;
+  summary: string;
+  source: string;
+  category: string;
+  url: string;
+  timestamp: string;
+}
+
+export interface Vault {
+  name: string;
+  leaderAddress: string;
+  tvl: number;
+  pnl: number;
+  apr: number;
+}
+
+export interface Order {
+  coin: string;
+  side: string;
+  size: number;
+  price: number;
+  triggerPrice: number | null;
+  orderType: string;
+}
+
 export async function getPositions(address: string): Promise<Position[]> {
   return fetchApi(`/positions/${address}`);
 }
@@ -52,6 +79,15 @@ export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
   return fetchApi("/leaderboard");
 }
 
-export async function getOpenOrders(address: string) {
+export async function getOpenOrders(address: string): Promise<Order[]> {
   return fetchApi(`/orders/${address}`);
+}
+
+export async function getNews(category?: string): Promise<NewsItem[]> {
+  const query = category && category !== "all" ? `?category=${category}` : "";
+  return fetchApi(`/news${query}`);
+}
+
+export async function getVaults(): Promise<Vault[]> {
+  return fetchApi("/vaults");
 }

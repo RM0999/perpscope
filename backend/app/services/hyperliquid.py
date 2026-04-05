@@ -34,3 +34,8 @@ async def get_leaderboard() -> list:
 async def get_vault_summaries() -> list:
     """Fetch vault leader addresses."""
     return await post_info({"type": "vaultSummaries"})
+
+
+async def get_meta() -> dict:
+    """Fetch exchange metadata (coin list, universe info)."""
+    return await post_info({"type": "meta"})
