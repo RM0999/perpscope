@@ -39,7 +39,7 @@ export default function PortfolioPage() {
     const now = Date.now();
     const days = timeRange === "7D" ? 7 : 30;
     const cutoff = now - days * 86400000;
-    return fills.filter((f) => new Date(f.time).getTime() >= cutoff);
+    return fills.filter((f) => f.rawTime >= cutoff);
   }, [fills, timeRange]);
 
   // Compute stats
@@ -70,14 +70,12 @@ export default function PortfolioPage() {
   const chartData = useMemo(() => {
     if (filteredFills.length === 0) return [];
     // Sort by time ascending
-    const sorted = [...filteredFills].sort(
-      (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()
-    );
+    const sorted = [...filteredFills].sort((a, b) => a.rawTime - b.rawTime);
     let cumulative = 0;
     return sorted.map((f) => {
       cumulative += f.closedPnl;
       return {
-        time: new Date(f.time).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        time: f.rawTime > 0 ? new Date(f.rawTime).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : f.time,
         pnl: Number(cumulative.toFixed(2)),
       };
     });

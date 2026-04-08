@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { getLeaderboard, getVaults, downloadTopTraders, type LeaderboardEntry, type Vault } from "@/lib/api";
+import { getLeaderboard, getVaults, type LeaderboardEntry } from "@/lib/api";
+type Vault = { name: string; leaderAddress: string; tvl: number; pnl: number; apr: number };
 
 type Tab = "traders" | "vaults";
 
@@ -53,23 +54,7 @@ export default function LeaderboardPage() {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
         <h1 style={{ color: "var(--accent-green)" }}>^ Leaderboard</h1>
-        <button
-          onClick={() => downloadTopTraders(20)}
-          style={{
-            padding: "8px 16px",
-            background: "var(--bg-card)",
-            color: "var(--text-secondary)",
-            border: "1px solid var(--border)",
-            borderRadius: "4px",
-            fontFamily: "inherit",
-            fontSize: "11px",
-            cursor: "pointer",
-            letterSpacing: "1px",
-            textTransform: "uppercase",
-          }}
-        >
-          Export JSON
-        </button>
+        <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Live from Hyperliquid</span>
       </div>
 
       {/* Tab switcher */}

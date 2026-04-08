@@ -30,7 +30,6 @@ export default function CopyTradePage() {
     coinFilter: "",
     direction: "both",
   });
-  const wsRefs = useRef<Map<string, WebSocket>>(new Map());
   const pollIntervals = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const lastFillTimes = useRef<Map<string, string>>(new Map());
 
@@ -43,19 +42,12 @@ export default function CopyTradePage() {
 
   function removeWallet(w: string) {
     setWallets(wallets.filter((x) => x !== w));
-    // Clean up WebSocket
-    const ws = wsRefs.current.get(w);
-    if (ws) {
-      ws.close();
-      wsRefs.current.delete(w);
-    }
     // Clean up polling
     const interval = pollIntervals.current.get(w);
     if (interval) {
       clearInterval(interval);
       pollIntervals.current.delete(w);
     }
-    lastFillTimes.current.delete(w);
   }
 
   const addTradeEntry = useCallback((entry: TradeLogEntry) => {
@@ -99,45 +91,10 @@ export default function CopyTradePage() {
 
   const connectWallet = useCallback(
     (wallet: string) => {
-      try {
-        const wsUrl = `ws://localhost:8000/api/ws/fills/${wallet}`;
-        const ws = new WebSocket(wsUrl);
-        wsRefs.current.set(wallet, ws);
-
-        ws.onmessage = (event) => {
-          try {
-            const fill = JSON.parse(event.data);
-            if (fill.type === "ping" || fill.type === "error") return;
-            addTradeEntry({
-              time: fill.time || new Date().toISOString(),
-              wallet,
-              coin: fill.coin || "",
-              side: fill.side || "",
-              size: fill.size || fill.sz || 0,
-              price: fill.price || fill.px || 0,
-            });
-          } catch {
-            // Invalid message
-          }
-        };
-
-        ws.onerror = () => {
-          ws.close();
-        };
-
-        ws.onclose = () => {
-          wsRefs.current.delete(wallet);
-          // Fall back to polling
-          if (!pollIntervals.current.has(wallet)) {
-            startPolling(wallet);
-          }
-        };
-      } catch {
-        // WebSocket not available, fall back to polling
-        startPolling(wallet);
-      }
+      // Use direct polling to Hyperliquid API (no backend needed)
+      startPolling(wallet);
     },
-    [addTradeEntry, startPolling]
+    [startPolling]
   );
 
   // Connect/disconnect WebSockets when wallets change
@@ -146,18 +103,12 @@ export default function CopyTradePage() {
 
     // Connect new wallets
     wallets.forEach((w) => {
-      if (!wsRefs.current.has(w) && !pollIntervals.current.has(w)) {
+      if (!pollIntervals.current.has(w)) {
         connectWallet(w);
       }
     });
 
     // Disconnect removed wallets
-    wsRefs.current.forEach((ws, w) => {
-      if (!currentWallets.has(w)) {
-        ws.close();
-        wsRefs.current.delete(w);
-      }
-    });
     pollIntervals.current.forEach((interval, w) => {
       if (!currentWallets.has(w)) {
         clearInterval(interval);
@@ -194,7 +145,6 @@ export default function CopyTradePage() {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      wsRefs.current.forEach((ws) => ws.close());
       pollIntervals.current.forEach((interval) => clearInterval(interval));
     };
   }, []);
