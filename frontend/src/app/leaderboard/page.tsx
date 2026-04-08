@@ -24,8 +24,8 @@ export default function LeaderboardPage() {
         .finally(() => setLoading(false));
     } else {
       getVaults()
-        .then(setVaults)
-        .catch(() => setVaults([]))
+        .then((v) => { console.log("Vaults loaded:", v.length); setVaults(v); })
+        .catch((e) => { console.error("Vaults error:", e); setVaults([]); })
         .finally(() => setLoading(false));
     }
   }, [tab]);
@@ -86,7 +86,7 @@ export default function LeaderboardPage() {
         <p style={{ color: "var(--text-muted)" }}>Loading...</p>
       ) : tab === "traders" ? (
         entries.length === 0 ? (
-          <p style={{ color: "var(--text-muted)" }}>Connect backend to load leaderboard data</p>
+          <p style={{ color: "var(--text-muted)" }}>No leaderboard data available</p>
         ) : (
           <>
             {/* Podium */}
@@ -211,7 +211,7 @@ export default function LeaderboardPage() {
           </>
         )
       ) : vaults.length === 0 ? (
-        <p style={{ color: "var(--text-muted)" }}>Connect backend to load vault data</p>
+        <p style={{ color: "var(--text-muted)" }}>No vault data available</p>
       ) : (
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
