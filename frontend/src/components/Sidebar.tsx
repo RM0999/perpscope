@@ -8,7 +8,7 @@ const NAV_ITEMS = [
   { href: "/tracker", label: "Tracker", icon: "$" },
   { href: "/copytrade", label: "Copy Trade", icon: ">" },
   { href: "/news", label: "News", icon: "#" },
-  { href: "/leaderboard", label: "Leaderboard", icon: "^" },
+  { href: "/leaderboard", label: "Watchlist", icon: "^" },
   { href: "/portfolio", label: "Portfolio", icon: "%" },
 ];
 

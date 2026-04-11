@@ -21,9 +21,12 @@ async def get_open_orders(address: str) -> list:
     return await post_info({"type": "frontendOpenOrders", "user": address})
 
 
-async def get_user_fills(address: str) -> list:
+async def get_user_fills(address: str, start_time: int | None = None) -> list:
     """Fetch trade history via userFills."""
-    return await post_info({"type": "userFills", "user": address})
+    payload: dict = {"type": "userFills", "user": address}
+    if start_time is not None:
+        payload["startTime"] = start_time
+    return await post_info(payload)
 
 
 async def get_leaderboard() -> list:
@@ -34,3 +37,8 @@ async def get_leaderboard() -> list:
 async def get_vault_summaries() -> list:
     """Fetch vault leader addresses."""
     return await post_info({"type": "vaultSummaries"})
+
+
+async def get_meta() -> dict:
+    """Fetch exchange metadata (coin list, universe info)."""
+    return await post_info({"type": "meta"})
