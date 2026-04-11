@@ -193,9 +193,29 @@ export async function getFills(address: string, limit?: number): Promise<Fill[]>
 }
 
 export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
-  const data = await hlPost<Record<string, unknown>>({ type: "leaderboard" });
-  const rows = (data.leaderboardRows || data) as Record<string, unknown>[];
-  if (!Array.isArray(rows)) return [];
+  // The leaderboard endpoint may return different structures depending on the API version
+  const data = await hlPost<unknown>({ type: "leaderboard" });
+
+  // Handle different response shapes
+  let rows: Record<string, unknown>[] = [];
+  if (Array.isArray(data)) {
+    rows = data;
+  } else if (data && typeof data === "object") {
+    const obj = data as Record<string, unknown>;
+    if (Array.isArray(obj.leaderboardRows)) {
+      rows = obj.leaderboardRows;
+    } else {
+      // Try to find any array in the response
+      for (const val of Object.values(obj)) {
+        if (Array.isArray(val) && val.length > 0) {
+          rows = val;
+          break;
+        }
+      }
+    }
+  }
+
+  if (rows.length === 0) return [];
 
   return rows.map((row, i) => {
     const perfs = (row.windowPerformances || []) as [string, Record<string, string>][];
@@ -210,10 +230,10 @@ export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
 
     return {
       rank: i + 1,
-      address: String(row.ethAddress || ""),
+      address: String(row.ethAddress || row.address || ""),
       displayName: row.displayName ? String(row.displayName) : null,
       accountValue: parseFloat(String(row.accountValue || "0")),
-      pnl: wp.allTime ?? 0,
+      pnl: wp.allTime ?? parseFloat(String(row.accountValue || "0")),
       roi: parseFloat(String(row.roi || "0")) * 100,
       volume: parseFloat(String(row.volume || "0")),
       windowPerformances: wp,
@@ -221,19 +241,30 @@ export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
   });
 }
 
-export async function getVaults(): Promise<{ name: string; leaderAddress: string; tvl: number; pnl: number; apr: number }[]> {
-  const data = await hlPost<Record<string, unknown>[]>({ type: "vaultSummaries" });
-  if (!Array.isArray(data)) return [];
-  return data
-    .map((v) => {
-      const s = (v.summary || v) as Record<string, string>;
-      return {
-        name: String(s.name || "Unknown"),
-        leaderAddress: String(s.leader || s.leaderAddress || ""),
-        tvl: parseFloat(String(s.tvl || "0")),
-        pnl: parseFloat(String(s.allTimePnl || s.totalPnl || "0")),
-        apr: s.apr != null ? parseFloat(String(s.apr)) : 0,
-      };
-    })
-    .sort((a, b) => b.tvl - a.tvl);
+export async function getVaults(): Promise<{ name: string; vaultAddress: string; leaderAddress: string; tvl: number; pnl: number; apr: number }[]> {
+  const data = await hlPost<unknown>({ type: "vaultSummaries" });
+  const items = Array.isArray(data) ? data : [];
+  const vaults: { name: string; vaultAddress: string; leaderAddress: string; tvl: number; pnl: number; apr: number }[] = [];
+
+  for (const v of items) {
+    if (!v || typeof v !== "object") continue;
+    const raw = v as Record<string, unknown>;
+    // vaultSummaries returns objects with nested "summary" or flat fields
+    const s = (raw.summary || raw) as Record<string, unknown>;
+    const name = String(s.name || "Unknown");
+    const vaultAddr = String(raw.vaultAddress || s.vaultAddress || "");
+    const leader = String(s.leader || s.leaderAddress || "");
+    const tvl = parseFloat(String(s.tvl || "0"));
+    if (tvl === 0 && !s.name) continue; // skip empty entries
+    vaults.push({
+      name,
+      vaultAddress: vaultAddr,
+      leaderAddress: leader,
+      tvl,
+      pnl: parseFloat(String(s.allTimePnl || s.totalPnl || "0")),
+      apr: s.apr != null ? parseFloat(String(s.apr)) : 0,
+    });
+  }
+
+  return vaults.sort((a, b) => b.tvl - a.tvl);
 }

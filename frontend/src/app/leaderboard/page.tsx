@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { getLeaderboard, getVaults, type LeaderboardEntry } from "@/lib/api";
-type Vault = { name: string; leaderAddress: string; tvl: number; pnl: number; apr: number };
+type Vault = { name: string; vaultAddress: string; leaderAddress: string; tvl: number; pnl: number; apr: number };
 
 type Tab = "traders" | "vaults";
 
@@ -13,19 +13,21 @@ export default function LeaderboardPage() {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [vaults, setVaults] = useState<Vault[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState("");
   const [copiedAddr, setCopiedAddr] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
+    setFetchError("");
     if (tab === "traders") {
       getLeaderboard()
-        .then(setEntries)
-        .catch(() => setEntries([]))
+        .then((e) => { setEntries(e); })
+        .catch((err) => { setFetchError(String(err)); setEntries([]); })
         .finally(() => setLoading(false));
     } else {
       getVaults()
         .then(setVaults)
-        .catch(() => setVaults([]))
+        .catch((err) => { setFetchError(String(err)); setVaults([]); })
         .finally(() => setLoading(false));
     }
   }, [tab]);
@@ -86,7 +88,9 @@ export default function LeaderboardPage() {
         <p style={{ color: "var(--text-muted)" }}>Loading...</p>
       ) : tab === "traders" ? (
         entries.length === 0 ? (
-          <p style={{ color: "var(--text-muted)" }}>No leaderboard data available</p>
+          <p style={{ color: "var(--text-muted)" }}>
+            {fetchError ? `Error: ${fetchError}` : "No leaderboard data available"}
+          </p>
         ) : (
           <>
             {/* Podium */}
@@ -211,7 +215,9 @@ export default function LeaderboardPage() {
           </>
         )
       ) : vaults.length === 0 ? (
-        <p style={{ color: "var(--text-muted)" }}>No vault data available</p>
+        <p style={{ color: "var(--text-muted)" }}>
+          {fetchError ? `Error: ${fetchError}` : "No vault data available"}
+        </p>
       ) : (
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
