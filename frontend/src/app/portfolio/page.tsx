@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { getFills, type Fill } from "@/lib/api";
+import { getPortfolio, getFills, getPositions, type PortfolioPerformance, type Fill, type Position } from "@/lib/api";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -16,22 +16,35 @@ type TimeRange = "7D" | "30D" | "All";
 
 export default function PortfolioPage() {
   const [address, setAddress] = useState("");
+  const [portfolio, setPortfolio] = useState<PortfolioPerformance | null>(null);
+  const [positions, setPositions] = useState<Position[]>([]);
   const [fills, setFills] = useState<Fill[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
   const [timeRange, setTimeRange] = useState<TimeRange>("All");
 
   async function handleLoad() {
-    if (!address) return;
+    if (!address || loading) return;
     setLoading(true);
+    setError("");
     try {
-      const data = await getFills(address);
-      setFills(data);
+      const [portfolioData, fillData, posData] = await Promise.all([
+        getPortfolio(address),
+        getFills(address, 2000),
+        getPositions(address),
+      ]);
+      setPortfolio(portfolioData);
+      setFills(fillData);
+      setPositions(posData.positions);
     } catch (err) {
-      console.error("Failed to load fills:", err);
+      setError(err instanceof Error ? err.message : "Failed to load");
     } finally {
       setLoading(false);
     }
   }
+
+  // Compute unrealized PnL from open positions
+  const totalUnrealizedPnl = positions.reduce((sum, p) => sum + p.unrealizedPnl, 0);
 
   // Filter fills by time range
   const filteredFills = useMemo(() => {
@@ -42,34 +55,31 @@ export default function PortfolioPage() {
     return fills.filter((f) => f.rawTime >= cutoff);
   }, [fills, timeRange]);
 
-  // Compute stats
-  const totalPnl = filteredFills.reduce((sum, f) => sum + f.closedPnl, 0);
+  // Compute stats from fills
+  const recentPnl = filteredFills.reduce((sum, f) => sum + f.closedPnl, 0);
   const wins = filteredFills.filter((f) => f.closedPnl > 0);
   const losses = filteredFills.filter((f) => f.closedPnl < 0);
-  const winCount = wins.length;
-  const lossCount = losses.length;
   const totalFees = filteredFills.reduce((sum, f) => sum + f.fee, 0);
-
-  const avgTradeSize = filteredFills.length > 0
-    ? filteredFills.reduce((sum, f) => sum + f.size * f.price, 0) / filteredFills.length
-    : 0;
-
-  const largestWin = wins.length > 0
-    ? Math.max(...wins.map((f) => f.closedPnl))
-    : 0;
-
-  const largestLoss = losses.length > 0
-    ? Math.min(...losses.map((f) => f.closedPnl))
-    : 0;
-
   const grossProfit = wins.reduce((sum, f) => sum + f.closedPnl, 0);
   const grossLoss = Math.abs(losses.reduce((sum, f) => sum + f.closedPnl, 0));
   const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
 
-  // Chart data: cumulative PnL over time
+  // Chart data from portfolio timeline or fills
   const chartData = useMemo(() => {
+    // Prefer portfolio timeline if available
+    if (portfolio && portfolio.pnlByDay.length > 0) {
+      let data = portfolio.pnlByDay;
+      if (timeRange !== "All") {
+        const days = timeRange === "7D" ? 7 : 30;
+        data = data.slice(-days);
+      }
+      return data.map((d) => ({
+        time: new Date(d.day).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        pnl: d.pnl,
+      }));
+    }
+    // Fallback to fills-based cumulative PnL
     if (filteredFills.length === 0) return [];
-    // Sort by time ascending
     const sorted = [...filteredFills].sort((a, b) => a.rawTime - b.rawTime);
     let cumulative = 0;
     return sorted.map((f) => {
@@ -79,23 +89,9 @@ export default function PortfolioPage() {
         pnl: Number(cumulative.toFixed(2)),
       };
     });
-  }, [filteredFills]);
+  }, [portfolio, filteredFills, timeRange]);
 
-  const stats = [
-    { label: "Total PnL", value: `$${totalPnl.toFixed(2)}`, color: totalPnl >= 0 ? "var(--accent-green)" : "var(--accent-red)" },
-    { label: "Trades", value: filteredFills.length.toString(), color: "var(--text-primary)" },
-    { label: "Wins", value: winCount.toString(), color: "var(--accent-green)" },
-    { label: "Losses", value: lossCount.toString(), color: "var(--accent-red)" },
-    { label: "Win Rate", value: filteredFills.length > 0 ? `${((winCount / filteredFills.length) * 100).toFixed(1)}%` : "--", color: "var(--accent-yellow)" },
-  ];
-
-  const extraStats = [
-    { label: "Avg Trade Size", value: `$${avgTradeSize.toFixed(2)}`, color: "var(--text-primary)" },
-    { label: "Largest Win", value: `$${largestWin.toFixed(2)}`, color: "var(--accent-green)" },
-    { label: "Largest Loss", value: `$${largestLoss.toFixed(2)}`, color: "var(--accent-red)" },
-    { label: "Profit Factor", value: profitFactor === Infinity ? "INF" : profitFactor.toFixed(2), color: "var(--accent-purple)" },
-    { label: "Total Fees", value: `$${totalFees.toFixed(2)}`, color: "var(--text-muted)" },
-  ];
+  const lastPnl = chartData.length > 0 ? chartData[chartData.length - 1].pnl : 0;
 
   return (
     <div>
@@ -141,64 +137,83 @@ export default function PortfolioPage() {
         </button>
       </div>
 
-      {/* Stats row */}
+      {error && (
+        <div style={{ padding: "12px", background: "var(--bg-card)", border: "1px solid var(--accent-red)", borderRadius: "4px", marginBottom: "16px" }}>
+          <p style={{ color: "var(--accent-red)", fontSize: "12px", margin: 0 }}>{error}</p>
+        </div>
+      )}
+
+      {/* Account Overview — from clearinghouseState */}
+      {portfolio && (
+        <div style={{ display: "flex", gap: "12px", marginBottom: "12px", flexWrap: "wrap" }}>
+          {[
+            { label: "Account Value", value: `$${portfolio.accountValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, color: "var(--accent-green)" },
+            { label: "All-Time PnL", value: `$${portfolio.allTimePnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, color: portfolio.allTimePnl >= 0 ? "var(--accent-green)" : "var(--accent-red)" },
+            { label: "Open Positions", value: positions.length.toString(), color: "var(--accent-blue)" },
+            { label: "Unrealized PnL", value: `$${totalUnrealizedPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, color: totalUnrealizedPnl >= 0 ? "var(--accent-green)" : "var(--accent-red)" },
+          ].map((s) => (
+            <div
+              key={s.label}
+              style={{
+                padding: "16px",
+                background: "var(--bg-card)",
+                border: "1px solid var(--border)",
+                borderRadius: "4px",
+                flex: "1 1 0",
+                minWidth: "140px",
+                textAlign: "center",
+              }}
+            >
+              <div style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "1px", marginBottom: "4px" }}>
+                {s.label}
+              </div>
+              <div style={{ fontSize: "20px", fontWeight: 600, color: s.color }}>
+                {s.value}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Recent trading stats from fills */}
       {fills.length > 0 && (
-        <>
-          <div style={{ display: "flex", gap: "12px", marginBottom: "12px", flexWrap: "wrap" }}>
-            {stats.map((s) => (
-              <div
-                key={s.label}
-                style={{
-                  padding: "14px",
-                  background: "var(--bg-card)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "4px",
-                  flex: "1 1 0",
-                  minWidth: "120px",
-                  textAlign: "center",
-                }}
-              >
-                <div style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "1px", marginBottom: "4px" }}>
-                  {s.label}
-                </div>
-                <div style={{ fontSize: "18px", fontWeight: 600, color: s.color }}>
-                  {s.value}
-                </div>
+        <div style={{ display: "flex", gap: "12px", marginBottom: "24px", flexWrap: "wrap" }}>
+          {[
+            { label: "Recent Realized PnL", value: `$${recentPnl.toFixed(2)}`, color: recentPnl >= 0 ? "var(--accent-green)" : "var(--accent-red)" },
+            { label: "Trades", value: filteredFills.length.toString(), color: "var(--text-primary)" },
+            { label: "Win Rate", value: filteredFills.length > 0 ? `${((wins.length / filteredFills.length) * 100).toFixed(1)}%` : "--", color: "var(--accent-yellow)" },
+            { label: "Profit Factor", value: profitFactor === Infinity ? "INF" : profitFactor.toFixed(2), color: "var(--accent-purple)" },
+            { label: "Fees Paid", value: `$${totalFees.toFixed(2)}`, color: "var(--text-muted)" },
+          ].map((s) => (
+            <div
+              key={s.label}
+              style={{
+                padding: "12px",
+                background: "var(--bg-card)",
+                border: "1px solid var(--border)",
+                borderRadius: "4px",
+                flex: "1 1 0",
+                minWidth: "120px",
+                textAlign: "center",
+              }}
+            >
+              <div style={{ fontSize: "10px", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "1px", marginBottom: "4px" }}>
+                {s.label}
               </div>
-            ))}
-          </div>
-          <div style={{ display: "flex", gap: "12px", marginBottom: "24px", flexWrap: "wrap" }}>
-            {extraStats.map((s) => (
-              <div
-                key={s.label}
-                style={{
-                  padding: "14px",
-                  background: "var(--bg-card)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "4px",
-                  flex: "1 1 0",
-                  minWidth: "120px",
-                  textAlign: "center",
-                }}
-              >
-                <div style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "1px", marginBottom: "4px" }}>
-                  {s.label}
-                </div>
-                <div style={{ fontSize: "18px", fontWeight: 600, color: s.color }}>
-                  {s.value}
-                </div>
+              <div style={{ fontSize: "16px", fontWeight: 600, color: s.color }}>
+                {s.value}
               </div>
-            ))}
-          </div>
-        </>
+            </div>
+          ))}
+        </div>
       )}
 
       {/* PnL Chart */}
-      {fills.length > 0 && (
+      {(portfolio || fills.length > 0) && (
         <div style={{ marginBottom: "24px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
             <h2 style={{ color: "var(--text-secondary)", fontSize: "12px", textTransform: "uppercase", letterSpacing: "1px", margin: 0 }}>
-              Cumulative PnL
+              {portfolio?.pnlByDay.length ? "Portfolio PnL" : "Cumulative Realized PnL (recent fills)"}
             </h2>
             <div style={{ display: "flex", gap: "6px" }}>
               {(["7D", "30D", "All"] as TimeRange[]).map((r) => (
@@ -249,36 +264,20 @@ export default function PortfolioPage() {
                     </linearGradient>
                   </defs>
                   <CartesianGrid stroke="#222222" strokeDasharray="3 3" />
-                  <XAxis
-                    dataKey="time"
-                    tick={{ fill: "#555555", fontSize: 10 }}
-                    axisLine={{ stroke: "#222222" }}
-                    tickLine={{ stroke: "#222222" }}
-                  />
-                  <YAxis
-                    tick={{ fill: "#555555", fontSize: 10 }}
-                    axisLine={{ stroke: "#222222" }}
-                    tickLine={{ stroke: "#222222" }}
-                    tickFormatter={(v: number) => `$${v}`}
-                  />
+                  <XAxis dataKey="time" tick={{ fill: "#555555", fontSize: 10 }} axisLine={{ stroke: "#222222" }} tickLine={{ stroke: "#222222" }} />
+                  <YAxis tick={{ fill: "#555555", fontSize: 10 }} axisLine={{ stroke: "#222222" }} tickLine={{ stroke: "#222222" }} tickFormatter={(v: number) => `$${v.toLocaleString()}`} />
                   <Tooltip
-                    contentStyle={{
-                      background: "#161616",
-                      border: "1px solid #222222",
-                      borderRadius: "4px",
-                      fontFamily: "inherit",
-                      fontSize: "12px",
-                    }}
+                    contentStyle={{ background: "#161616", border: "1px solid #222222", borderRadius: "4px", fontFamily: "inherit", fontSize: "12px" }}
                     labelStyle={{ color: "#888888" }}
                     itemStyle={{ color: "#e0e0e0" }}
-                    formatter={(value) => [`$${Number(value).toFixed(2)}`, "PnL"]}
+                    formatter={(value) => [`$${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, "PnL"]}
                   />
                   <Area
                     type="monotone"
                     dataKey="pnl"
-                    stroke={totalPnl >= 0 ? "#00ff88" : "#ff4444"}
+                    stroke={lastPnl >= 0 ? "#00ff88" : "#ff4444"}
                     strokeWidth={2}
-                    fill={totalPnl >= 0 ? "url(#pnlGreenGrad)" : "url(#pnlRedGrad)"}
+                    fill={lastPnl >= 0 ? "url(#pnlGreenGrad)" : "url(#pnlRedGrad)"}
                   />
                 </AreaChart>
               </ResponsiveContainer>
@@ -289,51 +288,52 @@ export default function PortfolioPage() {
 
       {/* Trade history */}
       <h2 style={{ color: "var(--text-secondary)", fontSize: "12px", marginBottom: "12px", textTransform: "uppercase", letterSpacing: "1px" }}>
-        Trade History
+        Recent Trade History
       </h2>
       {fills.length === 0 ? (
         <p style={{ color: "var(--text-muted)", fontSize: "12px" }}>
-          {address ? "No trade history found" : "Enter a wallet address to load history"}
+          {address ? "No trade history found" : "Enter a wallet address to load portfolio"}
         </p>
       ) : (
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr style={{ borderBottom: "1px solid var(--border)" }}>
-              {["Coin", "Side", "Size", "Price", "PnL", "Fee", "Time"].map((h) => (
-                <th
-                  key={h}
-                  style={{
-                    padding: "8px",
-                    textAlign: "left",
-                    color: "var(--text-muted)",
-                    fontSize: "11px",
-                    textTransform: "uppercase",
-                    letterSpacing: "1px",
-                  }}
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filteredFills.map((f, i) => (
-              <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
-                <td style={{ padding: "8px", fontWeight: 600 }}>{f.coin}</td>
-                <td style={{ padding: "8px", color: f.side === "B" || f.side === "buy" ? "var(--accent-green)" : "var(--accent-red)" }}>
-                  {f.side === "B" || f.side === "buy" ? "BUY" : "SELL"}
-                </td>
-                <td style={{ padding: "8px" }}>{f.size}</td>
-                <td style={{ padding: "8px" }}>${f.price.toFixed(2)}</td>
-                <td style={{ padding: "8px", color: f.closedPnl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
-                  ${f.closedPnl.toFixed(2)}
-                </td>
-                <td style={{ padding: "8px" }}>${f.fee.toFixed(4)}</td>
-                <td style={{ padding: "8px", fontSize: "11px", color: "var(--text-muted)" }}>{f.time}</td>
+        <>
+          <p style={{ color: "var(--text-muted)", fontSize: "11px", marginBottom: "8px" }}>
+            Showing last {filteredFills.length} fills
+          </p>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                {["Coin", "Action", "Size", "Price", "PnL", "Fee", "Time"].map((h) => (
+                  <th key={h} style={{ padding: "8px", textAlign: "left", color: "var(--text-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "1px" }}>
+                    {h}
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {filteredFills.map((f, i) => (
+                <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
+                  <td style={{ padding: "8px", fontWeight: 600 }}>{f.coin}</td>
+                  <td style={{
+                    padding: "8px",
+                    fontSize: "12px",
+                    color: f.dir?.includes("Long") ? "var(--accent-green)"
+                      : f.dir?.includes("Short") ? "var(--accent-red)"
+                      : f.side === "B" ? "var(--accent-green)" : "var(--accent-red)",
+                  }}>
+                    {f.dir || (f.side === "B" ? "BUY" : "SELL")}
+                  </td>
+                  <td style={{ padding: "8px" }}>{f.size}</td>
+                  <td style={{ padding: "8px" }}>${f.price.toFixed(2)}</td>
+                  <td style={{ padding: "8px", color: f.closedPnl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
+                    {f.closedPnl !== 0 ? `$${f.closedPnl.toFixed(2)}` : ""}
+                  </td>
+                  <td style={{ padding: "8px", fontSize: "11px", color: "var(--text-muted)" }}>${f.fee.toFixed(4)}</td>
+                  <td style={{ padding: "8px", fontSize: "11px", color: "var(--text-muted)" }}>{f.time}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
       )}
     </div>
   );

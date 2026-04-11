@@ -12,6 +12,15 @@ async function hlPost<T>(payload: object): Promise<T> {
 
 // ── Types ──
 
+export interface PortfolioPerformance {
+  accountValue: number;
+  allTimePnl: number;
+  allTimeRoi: number;
+  totalDeposits: number;
+  totalWithdrawals: number;
+  pnlByDay: { day: string; pnl: number; accountValue: number }[];
+}
+
 export interface Position {
   coin: string;
   direction: "LONG" | "SHORT";
@@ -227,4 +236,74 @@ export async function fetchWalletSummaries(addresses: string[]): Promise<Leaderb
     .map((r) => r.value)
     .sort((a, b) => b.accountValue - a.accountValue)
     .map((entry, i) => ({ ...entry, rank: i + 1 }));
+}
+
+export async function getPortfolio(address: string): Promise<PortfolioPerformance> {
+  // Fetch portfolio performance + current account state in parallel
+  const [portfolio, state] = await Promise.all([
+    hlPost<unknown>({ type: "portfolio", user: address }),
+    hlPost<Record<string, unknown>>({ type: "clearinghouseState", user: address }),
+  ]);
+
+  const margin = (state.marginSummary || {}) as Record<string, string>;
+  const accountValue = parseFloat(margin.accountValue || "0");
+  const withdrawable = parseFloat(margin.withdrawable || "0");
+
+  // Parse portfolio response — structure varies, handle gracefully
+  let allTimePnl = 0;
+  let allTimeRoi = 0;
+  let totalDeposits = 0;
+  let totalWithdrawals = 0;
+  const pnlByDay: { day: string; pnl: number; accountValue: number }[] = [];
+
+  if (portfolio && typeof portfolio === "object") {
+    const p = portfolio as Record<string, unknown>;
+
+    // Try to extract cumulative PnL data
+    if (Array.isArray(p.clearinghousePortfolioTimeline)) {
+      for (const entry of p.clearinghousePortfolioTimeline) {
+        const e = entry as Record<string, unknown>;
+        const ts = e.timestamp ? String(e.timestamp) : "";
+        const av = parseFloat(String(e.accountValue || "0"));
+        const cpnl = parseFloat(String(e.cumulativePnl || "0"));
+        if (ts) {
+          pnlByDay.push({
+            day: ts.slice(0, 10),
+            pnl: cpnl,
+            accountValue: av,
+          });
+        }
+      }
+    }
+
+    // Extract totals
+    if (p.allTimePnl != null) allTimePnl = parseFloat(String(p.allTimePnl));
+    if (p.allTimeRoi != null) allTimeRoi = parseFloat(String(p.allTimeRoi));
+    if (p.totalDeposits != null) totalDeposits = parseFloat(String(p.totalDeposits));
+    if (p.totalWithdrawals != null) totalWithdrawals = parseFloat(String(p.totalWithdrawals));
+
+    // If allTimePnl wasn't at the top level, compute from timeline
+    if (allTimePnl === 0 && pnlByDay.length > 0) {
+      allTimePnl = pnlByDay[pnlByDay.length - 1].pnl;
+    }
+  }
+
+  // Compute ROI from account value and deposits if not provided
+  if (allTimeRoi === 0 && totalDeposits > 0) {
+    allTimeRoi = allTimePnl / totalDeposits;
+  }
+
+  // If we still don't have deposits, estimate from accountValue - PnL - withdrawable
+  if (totalDeposits === 0 && accountValue > 0) {
+    totalDeposits = accountValue - allTimePnl + totalWithdrawals;
+  }
+
+  return {
+    accountValue,
+    allTimePnl,
+    allTimeRoi,
+    totalDeposits: Math.max(0, totalDeposits),
+    totalWithdrawals,
+    pnlByDay,
+  };
 }
