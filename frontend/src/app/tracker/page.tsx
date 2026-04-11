@@ -37,6 +37,9 @@ function TrackerContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [autoLoaded, setAutoLoaded] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
+  const [secondsAgo, setSecondsAgo] = useState(0);
+  const [autoRefresh, setAutoRefresh] = useState(true);
 
   useEffect(() => {
     if (address && !autoLoaded) {
@@ -46,8 +49,38 @@ function TrackerContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Auto-refresh every 30s
+  useEffect(() => {
+    if (!address || !lastUpdated || !autoRefresh) return;
+    const interval = setInterval(async () => {
+      try {
+        const [posResponse, orderData, fillData] = await Promise.all([
+          getPositions(address),
+          getOpenOrders(address),
+          getFills(address, 20),
+        ]);
+        setPositions(posResponse.positions);
+        setAccountSummary(posResponse.accountSummary);
+        setOrders(orderData);
+        setFills(fillData);
+        setLastUpdated(Date.now());
+      } catch {
+        // Silent fail on auto-refresh
+      }
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [address, lastUpdated, autoRefresh]);
+
+  // Tick the "seconds ago" counter
+  useEffect(() => {
+    if (!lastUpdated) return;
+    setSecondsAgo(0);
+    const tick = setInterval(() => setSecondsAgo(Math.floor((Date.now() - lastUpdated) / 1000)), 1000);
+    return () => clearInterval(tick);
+  }, [lastUpdated]);
+
   async function handleTrack() {
-    if (!address) return;
+    if (!address || loading) return;
     setLoading(true);
     setError("");
     try {
@@ -60,6 +93,7 @@ function TrackerContent() {
       setAccountSummary(posResponse.accountSummary);
       setOrders(orderData);
       setFills(fillData);
+      setLastUpdated(Date.now());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch data");
     } finally {
@@ -111,6 +145,29 @@ function TrackerContent() {
         </button>
       </div>
 
+      {lastUpdated && (
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "16px" }}>
+          <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+            Updated {secondsAgo}s ago
+          </span>
+          <button
+            onClick={() => setAutoRefresh((v) => !v)}
+            style={{
+              padding: "4px 10px",
+              color: autoRefresh ? "var(--accent-green)" : "var(--text-muted)",
+              border: `1px solid ${autoRefresh ? "var(--accent-green)" : "var(--border)"}`,
+              borderRadius: "4px",
+              background: "var(--bg-card)",
+              fontFamily: "inherit",
+              fontSize: "10px",
+              cursor: "pointer",
+            }}
+          >
+            Auto-refresh: {autoRefresh ? "ON" : "OFF"}
+          </button>
+        </div>
+      )}
+
       {error && (
         <div style={{ padding: "12px", background: "var(--bg-card)", border: "1px solid var(--accent-red)", borderRadius: "4px", marginBottom: "16px" }}>
           <p style={{ color: "var(--accent-red)", fontSize: "12px", margin: 0 }}>{error}</p>
@@ -161,7 +218,7 @@ function TrackerContent() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                {["Dir", "Coin", "Size", "Entry", "Mark", "Lev", "Mode", "TP", "SL", "Liq", "uPnL"].map((h) => (
+                {["Dir", "Coin", "Size", "Value", "Entry", "Mark", "Lev", "Mode", "TP", "SL", "Liq", "uPnL", "ROE"].map((h) => (
                   <th key={h} style={{ padding: "8px", textAlign: "left", color: "var(--text-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "1px", whiteSpace: "nowrap" }}>
                     {h}
                   </th>
@@ -170,12 +227,18 @@ function TrackerContent() {
             </thead>
             <tbody>
               {positions.map((p, i) => (
-                <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
+                <tr key={i} style={{
+                  borderBottom: "1px solid var(--border)",
+                  background: p.unrealizedPnl > 0 ? "rgba(0,255,136,0.03)" : p.unrealizedPnl < 0 ? "rgba(255,68,68,0.03)" : "transparent",
+                }}>
                   <td style={{ padding: "8px", color: p.direction === "LONG" ? "var(--accent-green)" : "var(--accent-red)", fontWeight: 600, fontSize: "12px" }}>
                     {p.direction}
                   </td>
                   <td style={{ padding: "8px", fontWeight: 600 }}>{p.coin}</td>
                   <td style={{ padding: "8px" }}>{p.size.toFixed(4)}</td>
+                  <td style={{ padding: "8px", fontSize: "12px" }}>
+                    ${p.positionValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </td>
                   <td style={{ padding: "8px" }}>${p.entryPrice.toFixed(2)}</td>
                   <td style={{ padding: "8px" }}>${p.markPrice.toFixed(2)}</td>
                   <td style={{ padding: "8px" }}>{p.leverage}x</td>
@@ -191,6 +254,9 @@ function TrackerContent() {
                   </td>
                   <td style={{ padding: "8px", color: p.unrealizedPnl >= 0 ? "var(--accent-green)" : "var(--accent-red)", fontWeight: 600 }}>
                     ${p.unrealizedPnl.toFixed(2)}
+                  </td>
+                  <td style={{ padding: "8px", color: p.returnOnEquity >= 0 ? "var(--accent-green)" : "var(--accent-red)", fontSize: "12px" }}>
+                    {(p.returnOnEquity * 100).toFixed(2)}%
                   </td>
                 </tr>
               ))}

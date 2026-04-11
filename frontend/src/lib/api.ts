@@ -83,10 +83,15 @@ export interface Order {
 
 // ── API functions (all direct to Hyperliquid) ──
 
+export async function getAllMids(): Promise<Record<string, string>> {
+  return hlPost<Record<string, string>>({ type: "allMids" });
+}
+
 export async function getPositions(address: string): Promise<PositionsResponse> {
-  const [state, orders] = await Promise.all([
+  const [state, orders, mids] = await Promise.all([
     hlPost<Record<string, unknown>>({ type: "clearinghouseState", user: address }),
     hlPost<Record<string, unknown>[]>({ type: "frontendOpenOrders", user: address }),
+    getAllMids(),
   ]);
 
   // Build TP/SL map from orders
@@ -121,18 +126,26 @@ export async function getPositions(address: string): Promise<PositionsResponse> 
     const lev = (pos.leverage || {}) as Record<string, string>;
     const coinTpSl = tpSl[coin] || { tp: null, sl: null };
 
+    const entryPx = parseFloat(String(pos.entryPx || "0"));
+    const markPx = parseFloat(String(pos.markPx || mids[coin] || "0"));
+    const absSize = Math.abs(size);
+    const rawUpnl = parseFloat(String(pos.unrealizedPnl || "0"));
+    const computedUpnl = rawUpnl !== 0 ? rawUpnl : (markPx - entryPx) * size;
+    const rawLiqPx = pos.liquidationPx ? parseFloat(String(pos.liquidationPx)) : null;
+    const liqPx = (rawLiqPx !== null && isFinite(rawLiqPx) && rawLiqPx > 0 && rawLiqPx < 1_000_000) ? rawLiqPx : null;
+
     positions.push({
       coin,
       direction: size > 0 ? "LONG" : "SHORT",
-      size: Math.abs(size),
-      entryPrice: parseFloat(String(pos.entryPx || "0")),
-      markPrice: parseFloat(String(pos.markPx || "0")),
+      size: absSize,
+      entryPrice: entryPx,
+      markPrice: markPx,
       leverage: parseFloat(String(lev.value || "1")),
       marginMode: lev.type === "cross" ? "Cross" : "Isolated",
-      unrealizedPnl: parseFloat(String(pos.unrealizedPnl || "0")),
-      liquidationPrice: pos.liquidationPx ? parseFloat(String(pos.liquidationPx)) : null,
+      unrealizedPnl: computedUpnl,
+      liquidationPrice: liqPx,
       returnOnEquity: parseFloat(String(pos.returnOnEquity || "0")),
-      positionValue: parseFloat(String(pos.positionValue || "0")),
+      positionValue: absSize * markPx,
       marginUsed: parseFloat(String(pos.marginUsed || "0")),
       takeProfitPrice: coinTpSl.tp,
       stopLossPrice: coinTpSl.sl,
@@ -200,7 +213,7 @@ export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
       address: String(row.ethAddress || ""),
       displayName: row.displayName ? String(row.displayName) : null,
       accountValue: parseFloat(String(row.accountValue || "0")),
-      pnl: parseFloat(String(row.accountValue || "0")),
+      pnl: wp.allTime ?? 0,
       roi: parseFloat(String(row.roi || "0")) * 100,
       volume: parseFloat(String(row.volume || "0")),
       windowPerformances: wp,

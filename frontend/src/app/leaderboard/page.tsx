@@ -24,8 +24,8 @@ export default function LeaderboardPage() {
         .finally(() => setLoading(false));
     } else {
       getVaults()
-        .then((v) => { console.log("Vaults loaded:", v.length); setVaults(v); })
-        .catch((e) => { console.error("Vaults error:", e); setVaults([]); })
+        .then(setVaults)
+        .catch(() => setVaults([]))
         .finally(() => setLoading(false));
     }
   }, [tab]);
@@ -123,7 +123,7 @@ export default function LeaderboardPage() {
                       {copiedAddr === entry.address ? "Copied!" : `${entry.address.slice(0, 6)}...${entry.address.slice(-4)}`}
                     </div>
                     <div style={{ color: entry.pnl >= 0 ? "var(--accent-green)" : "var(--accent-red)", fontWeight: 600, marginBottom: "4px" }}>
-                      ${entry.pnl.toLocaleString()}
+                      {formatPnl(entry.pnl)}
                     </div>
                     <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>
                       {entry.roi.toFixed(1)}% ROI
@@ -193,7 +193,7 @@ export default function LeaderboardPage() {
                         ${entry.accountValue.toLocaleString()}
                       </td>
                       <td style={{ padding: "8px", color: entry.pnl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
-                        ${entry.pnl.toLocaleString()}
+                        {formatPnl(entry.pnl)}
                       </td>
                       <td style={{ padding: "8px", fontSize: "12px", color: (wp?.day ?? 0) >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
                         {formatPnl(wp?.day)}
