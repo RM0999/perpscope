@@ -192,79 +192,39 @@ export async function getFills(address: string, limit?: number): Promise<Fill[]>
   });
 }
 
-export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
-  // The leaderboard endpoint may return different structures depending on the API version
-  const data = await hlPost<unknown>({ type: "leaderboard" });
+// Fetch live account data for a list of wallet addresses
+export async function fetchWalletSummaries(addresses: string[]): Promise<LeaderboardEntry[]> {
+  const results = await Promise.allSettled(
+    addresses.map(async (address, i) => {
+      const state = await hlPost<Record<string, unknown>>({ type: "clearinghouseState", user: address });
+      const margin = (state.marginSummary || {}) as Record<string, string>;
+      const accountValue = parseFloat(margin.accountValue || "0");
+      const positions = ((state.assetPositions || []) as Record<string, unknown>[])
+        .filter((ap) => {
+          const pos = (ap.position || ap) as Record<string, string>;
+          return parseFloat(pos.szi || "0") !== 0;
+        });
+      const totalUpnl = positions.reduce((sum, ap) => {
+        const pos = (ap.position || ap) as Record<string, string>;
+        return sum + parseFloat(pos.unrealizedPnl || "0");
+      }, 0);
+      return {
+        rank: i + 1,
+        address,
+        displayName: null,
+        accountValue,
+        pnl: totalUpnl,
+        roi: accountValue > 0 ? (totalUpnl / accountValue) * 100 : 0,
+        volume: 0,
+        windowPerformances: null,
+        openPositions: positions.length,
+      } as LeaderboardEntry & { openPositions: number };
+    })
+  );
 
-  // Handle different response shapes
-  let rows: Record<string, unknown>[] = [];
-  if (Array.isArray(data)) {
-    rows = data;
-  } else if (data && typeof data === "object") {
-    const obj = data as Record<string, unknown>;
-    if (Array.isArray(obj.leaderboardRows)) {
-      rows = obj.leaderboardRows;
-    } else {
-      // Try to find any array in the response
-      for (const val of Object.values(obj)) {
-        if (Array.isArray(val) && val.length > 0) {
-          rows = val;
-          break;
-        }
-      }
-    }
-  }
-
-  if (rows.length === 0) return [];
-
-  return rows.map((row, i) => {
-    const perfs = (row.windowPerformances || []) as [string, Record<string, string>][];
-    const wp: WindowPerformance = { day: null, week: null, month: null, allTime: null };
-    for (const [window, vals] of perfs) {
-      const pnl = vals?.pnl != null ? parseFloat(String(vals.pnl)) : null;
-      if (window === "day") wp.day = pnl;
-      else if (window === "week") wp.week = pnl;
-      else if (window === "month") wp.month = pnl;
-      else if (window === "allTime") wp.allTime = pnl;
-    }
-
-    return {
-      rank: i + 1,
-      address: String(row.ethAddress || row.address || ""),
-      displayName: row.displayName ? String(row.displayName) : null,
-      accountValue: parseFloat(String(row.accountValue || "0")),
-      pnl: wp.allTime ?? parseFloat(String(row.accountValue || "0")),
-      roi: parseFloat(String(row.roi || "0")) * 100,
-      volume: parseFloat(String(row.volume || "0")),
-      windowPerformances: wp,
-    };
-  });
-}
-
-export async function getVaults(): Promise<{ name: string; vaultAddress: string; leaderAddress: string; tvl: number; pnl: number; apr: number }[]> {
-  const data = await hlPost<unknown>({ type: "vaultSummaries" });
-  const items = Array.isArray(data) ? data : [];
-  const vaults: { name: string; vaultAddress: string; leaderAddress: string; tvl: number; pnl: number; apr: number }[] = [];
-
-  for (const v of items) {
-    if (!v || typeof v !== "object") continue;
-    const raw = v as Record<string, unknown>;
-    // vaultSummaries returns objects with nested "summary" or flat fields
-    const s = (raw.summary || raw) as Record<string, unknown>;
-    const name = String(s.name || "Unknown");
-    const vaultAddr = String(raw.vaultAddress || s.vaultAddress || "");
-    const leader = String(s.leader || s.leaderAddress || "");
-    const tvl = parseFloat(String(s.tvl || "0"));
-    if (tvl === 0 && !s.name) continue; // skip empty entries
-    vaults.push({
-      name,
-      vaultAddress: vaultAddr,
-      leaderAddress: leader,
-      tvl,
-      pnl: parseFloat(String(s.allTimePnl || s.totalPnl || "0")),
-      apr: s.apr != null ? parseFloat(String(s.apr)) : 0,
-    });
-  }
-
-  return vaults.sort((a, b) => b.tvl - a.tvl);
+  return results
+    .filter((r): r is PromiseFulfilledResult<LeaderboardEntry & { openPositions: number }> => r.status === "fulfilled")
+    .map((r) => r.value)
+    .sort((a, b) => b.accountValue - a.accountValue)
+    .map((entry, i) => ({ ...entry, rank: i + 1 }));
 }

@@ -75,7 +75,7 @@ export default function Home() {
           { title: "$ Tracker", desc: "Live positions & news feed", href: "/tracker" },
           { title: "> Copy Trade", desc: "Follow top traders in real-time", href: "/copytrade" },
           { title: "# News", desc: "Filtered crypto news feed", href: "/news" },
-          { title: "^ Leaderboard", desc: "Top performers & vaults ranked", href: "/leaderboard" },
+          { title: "^ Watchlist", desc: "Track whale wallets live", href: "/leaderboard" },
           { title: "% Portfolio", desc: "PnL curves & performance stats", href: "/portfolio" },
         ].map((item) => (
           <a

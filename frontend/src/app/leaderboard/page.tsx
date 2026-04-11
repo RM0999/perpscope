@@ -1,36 +1,76 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { getLeaderboard, getVaults, type LeaderboardEntry } from "@/lib/api";
-type Vault = { name: string; vaultAddress: string; leaderAddress: string; tvl: number; pnl: number; apr: number };
+import { fetchWalletSummaries, type LeaderboardEntry } from "@/lib/api";
 
-type Tab = "traders" | "vaults";
+// Known whale/top trader addresses to pre-populate
+const DEFAULT_WALLETS = [
+  "0xb83de012dba672c76a7dbbbf3e459cb59d7d6e36",
+  "0x6940C181b764e5e3D76b14F15ed7263fB457F0c8",
+  "0xDBF2EB41a1BD52b4Aa31Ec569559Fc3512e0E2Da",
+  "0x4a09AFA8b46Cd50A1b8aC49BF0B8fB30ea2264CF",
+  "0x1bF631fD0d5D4dc2b8254e4108dA521Ab97a88Eb",
+  "0xecb63caa47c7c4e77f60f1ce858cf28dc2b82b00",
+];
+
+const STORAGE_KEY = "perpscope_watchlist";
+
+function loadWatchlist(): string[] {
+  if (typeof window === "undefined") return DEFAULT_WALLETS;
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch { /* ignore */ }
+  return DEFAULT_WALLETS;
+}
+
+function saveWatchlist(wallets: string[]) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(wallets)); } catch { /* ignore */ }
+}
 
 export default function LeaderboardPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>("traders");
+  const [wallets, setWallets] = useState<string[]>(loadWatchlist);
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
-  const [vaults, setVaults] = useState<Vault[]>([]);
   const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState("");
+  const [addInput, setAddInput] = useState("");
   const [copiedAddr, setCopiedAddr] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetchData = useCallback(async () => {
+    if (wallets.length === 0) { setEntries([]); setLoading(false); return; }
     setLoading(true);
-    setFetchError("");
-    if (tab === "traders") {
-      getLeaderboard()
-        .then((e) => { setEntries(e); })
-        .catch((err) => { setFetchError(String(err)); setEntries([]); })
-        .finally(() => setLoading(false));
-    } else {
-      getVaults()
-        .then(setVaults)
-        .catch((err) => { setFetchError(String(err)); setVaults([]); })
-        .finally(() => setLoading(false));
+    try {
+      const data = await fetchWalletSummaries(wallets);
+      setEntries(data);
+    } catch {
+      setEntries([]);
+    } finally {
+      setLoading(false);
     }
-  }, [tab]);
+  }, [wallets]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  function addWallet() {
+    const addr = addInput.trim();
+    if (addr && addr.startsWith("0x") && !wallets.includes(addr)) {
+      const updated = [...wallets, addr];
+      setWallets(updated);
+      saveWatchlist(updated);
+      setAddInput("");
+    }
+  }
+
+  function removeWallet(addr: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    const updated = wallets.filter((w) => w !== addr);
+    setWallets(updated);
+    saveWatchlist(updated);
+  }
 
   function copyAddress(addr: string, e: React.MouseEvent) {
     e.stopPropagation();
@@ -44,56 +84,80 @@ export default function LeaderboardPage() {
     router.push(`/tracker?address=${encodeURIComponent(address)}`);
   }
 
-  function formatPnl(val: number | null | undefined): string {
-    if (val == null) return "--";
-    return `$${val >= 0 ? "+" : ""}${val.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-  }
-
   const podium = entries.slice(0, 3);
   const rest = entries.slice(3);
 
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
-        <h1 style={{ color: "var(--accent-green)" }}>^ Leaderboard</h1>
-        <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Live from Hyperliquid</span>
+        <h1 style={{ color: "var(--accent-green)" }}>^ Watchlist</h1>
+        <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+          {entries.length} wallets tracked live
+        </span>
       </div>
 
-      {/* Tab switcher */}
+      {/* Add wallet */}
       <div style={{ display: "flex", gap: "8px", marginBottom: "24px" }}>
-        {(["traders", "vaults"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            style={{
-              padding: "8px 20px",
-              background: tab === t ? "var(--accent-green)" : "var(--bg-card)",
-              color: tab === t ? "var(--bg-primary)" : "var(--text-secondary)",
-              border: `1px solid ${tab === t ? "var(--accent-green)" : "var(--border)"}`,
-              borderRadius: "4px",
-              fontFamily: "inherit",
-              fontSize: "12px",
-              cursor: "pointer",
-              fontWeight: tab === t ? 600 : 400,
-              textTransform: "uppercase",
-              letterSpacing: "1px",
-            }}
-          >
-            {t}
-          </button>
-        ))}
+        <input
+          type="text"
+          placeholder="0x... add wallet to watchlist"
+          value={addInput}
+          onChange={(e) => setAddInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && addWallet()}
+          style={{
+            flex: 1,
+            padding: "10px 12px",
+            background: "var(--bg-card)",
+            border: "1px solid var(--border)",
+            borderRadius: "4px",
+            color: "var(--text-primary)",
+            fontFamily: "inherit",
+            fontSize: "13px",
+            outline: "none",
+          }}
+        />
+        <button
+          onClick={addWallet}
+          style={{
+            padding: "10px 20px",
+            background: "var(--accent-green)",
+            color: "var(--bg-primary)",
+            border: "none",
+            borderRadius: "4px",
+            fontFamily: "inherit",
+            fontSize: "13px",
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          Add
+        </button>
+        <button
+          onClick={fetchData}
+          disabled={loading}
+          style={{
+            padding: "10px 16px",
+            background: "var(--bg-card)",
+            color: "var(--text-secondary)",
+            border: "1px solid var(--border)",
+            borderRadius: "4px",
+            fontFamily: "inherit",
+            fontSize: "13px",
+            cursor: "pointer",
+          }}
+        >
+          {loading ? "..." : "Refresh"}
+        </button>
       </div>
 
-      {loading ? (
-        <p style={{ color: "var(--text-muted)" }}>Loading...</p>
-      ) : tab === "traders" ? (
-        entries.length === 0 ? (
-          <p style={{ color: "var(--text-muted)" }}>
-            {fetchError ? `Error: ${fetchError}` : "No leaderboard data available"}
-          </p>
-        ) : (
-          <>
-            {/* Podium */}
+      {loading && entries.length === 0 ? (
+        <p style={{ color: "var(--text-muted)" }}>Fetching wallet data...</p>
+      ) : entries.length === 0 ? (
+        <p style={{ color: "var(--text-muted)" }}>Add wallet addresses above to start tracking</p>
+      ) : (
+        <>
+          {/* Podium — top 3 by account value */}
+          {podium.length >= 3 && (
             <div style={{ display: "flex", gap: "16px", marginBottom: "32px", justifyContent: "center" }}>
               {podium.map((entry, i) => {
                 const colors = ["var(--accent-yellow)", "var(--text-secondary)", "#cd7f32"];
@@ -116,143 +180,92 @@ export default function LeaderboardPage() {
                     <div style={{ fontSize: "24px", color: colors[i], marginBottom: "8px" }}>
                       #{i + 1}
                     </div>
-                    <div style={{ fontSize: "13px", color: "var(--text-primary)", marginBottom: "2px", fontWeight: 600 }}>
-                      {entry.displayName || `${entry.address.slice(0, 6)}...${entry.address.slice(-4)}`}
-                    </div>
                     <div
                       onClick={(e) => copyAddress(entry.address, e)}
-                      style={{ fontSize: "10px", color: "var(--text-muted)", marginBottom: "8px", cursor: "pointer" }}
-                      title="Click to copy address"
+                      style={{ fontSize: "11px", color: "var(--text-muted)", marginBottom: "8px", cursor: "pointer" }}
+                      title="Click to copy"
                     >
                       {copiedAddr === entry.address ? "Copied!" : `${entry.address.slice(0, 6)}...${entry.address.slice(-4)}`}
                     </div>
-                    <div style={{ color: entry.pnl >= 0 ? "var(--accent-green)" : "var(--accent-red)", fontWeight: 600, marginBottom: "4px" }}>
-                      {formatPnl(entry.pnl)}
+                    <div style={{ fontSize: "16px", fontWeight: 600, color: "var(--accent-green)", marginBottom: "4px" }}>
+                      ${entry.accountValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                     </div>
-                    <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-                      {entry.roi.toFixed(1)}% ROI
+                    <div style={{ fontSize: "12px", color: entry.pnl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
+                      uPnL: ${entry.pnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                     </div>
-                    {entry.accountValue > 0 && (
-                      <div style={{ fontSize: "10px", color: "var(--text-muted)", marginTop: "4px" }}>
-                        Acct: ${entry.accountValue.toLocaleString()}
-                      </div>
-                    )}
                   </div>
                 );
               })}
             </div>
+          )}
 
-            {/* Ranked table */}
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                  {["Rank", "Trader", "Acct Value", "PnL", "Day PnL", "Week PnL", "ROI", "Volume"].map((h) => (
-                    <th
-                      key={h}
+          {/* Ranked table */}
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                {["#", "Address", "Account Value", "Unrealized PnL", "ROE", ""].map((h) => (
+                  <th
+                    key={h}
+                    style={{
+                      padding: "8px",
+                      textAlign: "left",
+                      color: "var(--text-muted)",
+                      fontSize: "11px",
+                      textTransform: "uppercase",
+                      letterSpacing: "1px",
+                    }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(podium.length >= 3 ? rest : entries).map((entry) => (
+                <tr
+                  key={entry.address}
+                  onClick={() => trackWallet(entry.address)}
+                  style={{ borderBottom: "1px solid var(--border)", cursor: "pointer" }}
+                >
+                  <td style={{ padding: "8px", color: "var(--text-muted)" }}>{entry.rank}</td>
+                  <td style={{ padding: "8px" }}>
+                    <span
+                      onClick={(e) => copyAddress(entry.address, e)}
+                      style={{ fontSize: "12px", cursor: "pointer" }}
+                      title="Click to copy"
+                    >
+                      {copiedAddr === entry.address ? "Copied!" : `${entry.address.slice(0, 6)}...${entry.address.slice(-4)}`}
+                    </span>
+                  </td>
+                  <td style={{ padding: "8px", fontWeight: 600 }}>
+                    ${entry.accountValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                  </td>
+                  <td style={{ padding: "8px", color: entry.pnl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
+                    ${entry.pnl.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                  </td>
+                  <td style={{ padding: "8px", color: entry.roi >= 0 ? "var(--accent-green)" : "var(--accent-red)", fontSize: "12px" }}>
+                    {entry.roi.toFixed(2)}%
+                  </td>
+                  <td style={{ padding: "8px" }}>
+                    <button
+                      onClick={(e) => removeWallet(entry.address, e)}
                       style={{
-                        padding: "8px",
-                        textAlign: "left",
-                        color: "var(--text-muted)",
+                        background: "none",
+                        border: "none",
+                        color: "var(--accent-red)",
+                        cursor: "pointer",
+                        fontFamily: "inherit",
                         fontSize: "11px",
-                        textTransform: "uppercase",
-                        letterSpacing: "1px",
                       }}
                     >
-                      {h}
-                    </th>
-                  ))}
+                      x
+                    </button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {rest.map((entry) => {
-                  const wp = entry.windowPerformances;
-                  return (
-                    <tr
-                      key={entry.address}
-                      onClick={() => trackWallet(entry.address)}
-                      style={{ borderBottom: "1px solid var(--border)", cursor: "pointer" }}
-                    >
-                      <td style={{ padding: "8px" }}>#{entry.rank}</td>
-                      <td style={{ padding: "8px" }}>
-                        <div style={{ fontSize: "12px", fontWeight: entry.displayName ? 600 : 400 }}>
-                          {entry.displayName || `${entry.address.slice(0, 6)}...${entry.address.slice(-4)}`}
-                        </div>
-                        {entry.displayName && (
-                          <div
-                            onClick={(e) => copyAddress(entry.address, e)}
-                            style={{ fontSize: "10px", color: "var(--text-muted)", cursor: "pointer" }}
-                            title="Click to copy"
-                          >
-                            {copiedAddr === entry.address ? "Copied!" : `${entry.address.slice(0, 6)}...${entry.address.slice(-4)}`}
-                          </div>
-                        )}
-                        {!entry.displayName && (
-                          <span
-                            onClick={(e) => copyAddress(entry.address, e)}
-                            style={{ display: "none" }}
-                          />
-                        )}
-                      </td>
-                      <td style={{ padding: "8px", fontSize: "12px" }}>
-                        ${entry.accountValue.toLocaleString()}
-                      </td>
-                      <td style={{ padding: "8px", color: entry.pnl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
-                        {formatPnl(entry.pnl)}
-                      </td>
-                      <td style={{ padding: "8px", fontSize: "12px", color: (wp?.day ?? 0) >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
-                        {formatPnl(wp?.day)}
-                      </td>
-                      <td style={{ padding: "8px", fontSize: "12px", color: (wp?.week ?? 0) >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
-                        {formatPnl(wp?.week)}
-                      </td>
-                      <td style={{ padding: "8px" }}>{entry.roi.toFixed(1)}%</td>
-                      <td style={{ padding: "8px" }}>${entry.volume.toLocaleString()}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </>
-        )
-      ) : vaults.length === 0 ? (
-        <p style={{ color: "var(--text-muted)" }}>
-          {fetchError ? `Error: ${fetchError}` : "No vault data available"}
-        </p>
-      ) : (
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr style={{ borderBottom: "1px solid var(--border)" }}>
-              {["Vault", "Leader", "TVL", "PnL", "APR"].map((h) => (
-                <th key={h} style={{ padding: "8px", textAlign: "left", color: "var(--text-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "1px" }}>
-                  {h}
-                </th>
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {vaults.map((v) => (
-              <tr
-                key={v.leaderAddress}
-                onClick={() => trackWallet(v.leaderAddress)}
-                style={{ borderBottom: "1px solid var(--border)", cursor: "pointer" }}
-              >
-                <td style={{ padding: "8px", fontWeight: 600 }}>{v.name}</td>
-                <td
-                  style={{ padding: "8px", fontSize: "12px", color: "var(--text-secondary)" }}
-                  onClick={(e) => copyAddress(v.leaderAddress, e)}
-                  title="Click to copy"
-                >
-                  {copiedAddr === v.leaderAddress ? "Copied!" : `${v.leaderAddress.slice(0, 6)}...${v.leaderAddress.slice(-4)}`}
-                </td>
-                <td style={{ padding: "8px" }}>${v.tvl.toLocaleString()}</td>
-                <td style={{ padding: "8px", color: v.pnl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
-                  ${v.pnl.toLocaleString()}
-                </td>
-                <td style={{ padding: "8px", color: "var(--accent-purple)" }}>{v.apr.toFixed(1)}%</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </>
       )}
     </div>
   );
